@@ -18,8 +18,8 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 8080 # The port that the container is running on in the cluster
-          imagePullSecrets:
-            - name: dockerhub
+      imagePullSecrets:
+        - name: dockerhub
 
 
 ---
