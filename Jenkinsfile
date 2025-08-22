@@ -1,31 +1,82 @@
 pipeline {
     agent any
-    
     tools {
-        maven 'maven3.6'
-        jdk 'jdk17'
+        jdk "jdk17"
+        maven "maven3"
     }
-
+    environment {
+        SCANNER_HOME = tool "sonar-scanner"
+    }
     stages {
-        
-        stage('Compile') {
+        stage('checkout') {
             steps {
-             sh 'mvn compile'
+                git branch: 'main', credentialsId: 'github', url: 'https://github.com/MHaneefa93/Boardgame.git'
             }
         }
-        stage('test') {
+       stage('compile') {
             steps {
-                sh 'mvn test'
+                sh "mvn compile"    
             }
         }
-        stage('Package') {
+       stage('test') {
             steps {
-               sh 'mvn package'
+                sh "mvn test"
             }
         }
-        stage('Hello') {
+       stage('file system scan') {
             steps {
-                echo 'Hello World'
+                sh '''docker run --rm -v $(pwd):/project aquasec/trivy:latest --format table -o /project/trivy-fs.html fs /project'''
+             }
+        }
+       stage('sonarqube analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    sh "$SCANNER_HOME/bin/sonar-scanner  -Dsonar.projectKey=broadgame -Dsonar.projectName=broadgame -Dsonar.java.binaries=."
+                }
+            }
+        }
+       stage('quality gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar'
+                }
+            }
+        }
+       stage('build') {
+            steps {
+                sh "mvn package"
+            }
+        }
+       stage('publish to nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'maven-settings', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh "mvn deploy"
+                }
+            }
+        }
+       stage('build & tag docker image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh "docker build -t haneefa93/broadgame:1.0 ."
+                    }    
+                }
+            }
+        }
+        stage('push docker image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh "docker push haneefa93/broadgame:1.0"
+                    }    
+                }
+            }
+        }
+        stage('deploy') {
+            steps {
+                withKubeConfig(caCertificate: '', clusterName: 'minikube', contextName: '', credentialsId: 'k8s', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://192.168.49.2:8443') {
+                    sh "kubectl apply -f deployment-service.yaml"    
+                }    
             }
         }
     }
